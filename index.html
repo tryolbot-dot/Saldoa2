@@ -241,10 +241,10 @@ var MERCH_CAT = {
 // ---- Configuração do Apps Script -------------------------------------
 // Cola aqui o URL /exec obtido no passo 4 do Codigo.gs. Enquanto ficar
 // como está, a página funciona em modo local (só neste dispositivo).
-var APPS_SCRIPT_URL = "COLA-AQUI-O-URL-DO-APPS-SCRIPT";
+var APPS_SCRIPT_URL = "";
 // ------------------------------------------------------------------------
 
-var sheetsOK = APPS_SCRIPT_URL.indexOf("COLA-AQUI") === -1;
+var sheetsOK = APPS_SCRIPT_URL.indexOf("https://script.google.com/macros/s/AKfycbz5_9sZCSbG4VhiBqawcTOiSJYmQFPaGPMkq13yL795nhrZAHS5rpN--AkhwWtIuG40/exec") === -1;
 var LOCAL_KEY = "saldoADois.entries";
 var entries = [];
 var locais = DEFAULT_MERCHANTS.slice();
