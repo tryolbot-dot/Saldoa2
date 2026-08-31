@@ -4,44 +4,22 @@
 <!--
   SALDO A DOIS — despesas partilhadas
   =====================================
-  Como ativar a partilha em tempo real (Firebase, gratuito):
+  Esta página guarda as despesas diretamente numa Google Sheet (que faz de
+  base de dados), através de um pequeno Apps Script. Ver o ficheiro
+  Codigo.gs para as instruções completas de configuração (5 passos).
 
-  1. Vai a https://console.firebase.google.com → "Adicionar projeto" → dá-lhe
-     um nome (ex.: saldo-a-dois) → podes desativar o Google Analytics.
-  2. Dentro do projeto: ícone "</>" (Adicionar app Web) → dá um nome → NÃO
-     precisas de Firebase Hosting → "Registar app". Vais ver um bloco
-     `firebaseConfig = { apiKey: ..., authDomain: ..., ... }`. Copia esses
-     valores.
-  3. No menu esquerdo: Build → Firestore Database → "Criar base de dados"
-     → escolhe uma localização (ex.: eur3) → modo "produção".
-  4. Separador "Regras" da Firestore Database, substitui pelo seguinte e
-     publica:
+  Resumindo: cria uma Google Sheet → Extensões → Apps Script → cola o
+  Codigo.gs → corre a função "setup" uma vez → Implementar → Aplicação
+  Web (Executar como: Eu; Acesso: Qualquer pessoa) → copia o URL /exec e
+  cola-o aqui em baixo, na variável APPS_SCRIPT_URL.
 
-       rules_version = '2';
-       service cloud.firestore {
-         match /databases/{database}/documents {
-           match /{document=**} {
-             allow read, write: if true;
-           }
-         }
-       }
-
-     (Isto deixa qualquer pessoa com o link do site ler/escrever nesta base
-     de dados — é simples de propósito, tal como usar o mesmo link. Não
-     partilhes o link publicamente.)
-  5. Volta a este ficheiro e substitui os valores de exemplo no objeto
-     `firebaseConfig`, mais abaixo neste <head>, pelos que copiaste no
-     passo 2. Grava e publica no GitHub Pages.
-
-  Sem estes passos, a página funciona na mesma, mas cada pessoa só vê a
-  sua própria lista (guardada no seu browser).
+  Sem isso configurado, a página funciona à mesma, mas guarda as despesas
+  só neste dispositivo (localStorage), sem partilhar com ninguém.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Saldo a Dois</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,680&family=JetBrains+Mono:wght@500;600&display=swap">
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --ink:#1A1917;
@@ -123,6 +101,7 @@ h1,h2,p{margin:0;}
 button{font-family:var(--font-body); cursor:pointer;}
 input,button,select{color:var(--ink); font-size:15px;}
 input:focus,button:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+button:disabled{opacity:.55; cursor:default;}
 
 .topbar{padding:0 2px;}
 .eyebrow{font-size:12px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color:var(--accent); margin:0 0 4px;}
@@ -132,10 +111,8 @@ input:focus,button:focus-visible{outline:2px solid var(--accent); outline-offset
 .status .dot{ width:8px; height:8px; border-radius:50%; background:var(--ink-soft); flex:none; }
 .status.ok .dot{ background:var(--accent); }
 .status.err .dot{ background:var(--danger); }
-.status a{ color:inherit; }
 
 .card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:20px; }
-.card + .card{ margin-top:0; }
 .card h2{ font-size:13px; text-transform:uppercase; letter-spacing:.06em; font-weight:700; color:var(--ink-soft); margin-bottom:14px; }
 
 .headline{ font-family:var(--font-display); font-size:22px; font-weight:600; line-height:1.35; margin-bottom:16px; }
@@ -148,7 +125,6 @@ input:focus,button:focus-visible{outline:2px solid var(--accent); outline-offset
 .field label{ display:block; font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:5px; }
 .field input{ width:100%; padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--line-strong); background:var(--paper); color:var(--ink); }
 .row2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.row3{ display:grid; grid-template-columns:1fr 1fr 132px; gap:12px; }
 
 .toggle{ display:flex; gap:8px; }
 .toggle button{ flex:1; padding:10px; border-radius:var(--radius-sm); border:1px solid var(--line-strong); background:var(--paper); color:var(--ink); font-weight:600; }
@@ -177,11 +153,7 @@ ul.entries li{ display:flex; justify-content:space-between; align-items:center; 
 .badge.NADINE{ background:var(--nadine-soft); color:var(--nadine); }
 .entry-del{ border:none; background:transparent; color:var(--ink-soft); font-size:17px; line-height:1; padding:4px 6px; border-radius:6px; }
 .entry-del:hover{ background:var(--danger-soft); color:var(--danger); }
-.empty{ font-size:13.5px; color:var(--ink-soft); padding:6px 2px; }
-
-.export-actions{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
-.hint{ font-size:13px; color:var(--ink-soft); line-height:1.5; }
-.copied-msg{ font-size:12.5px; color:var(--accent); font-weight:600; margin-top:8px; height:16px; }
+.empty{ font-size:13.5px; color:var(--ink-soft); padding:6px 2px; border:none !important; }
 
 .footer{ text-align:center; font-size:12px; color:var(--ink-soft); padding-top:8px; }
 </style>
@@ -192,11 +164,11 @@ ul.entries li{ display:flex; justify-content:space-between; align-items:center; 
   <div class="topbar">
     <p class="eyebrow">Despesas partilhadas</p>
     <h1 class="title">Saldo a Dois</h1>
-    <div class="status" id="statusBox"><span class="dot"></span><span id="statusText">A verificar ligação…</span></div>
+    <div class="status" id="statusBox"><span class="dot"></span><span id="statusText">A ligar…</span></div>
   </div>
 
   <div class="card">
-    <h2>Saldo atual</h2>
+    <h2>Saldo do mês</h2>
     <p class="headline" id="headline">—</p>
     <div class="stats" id="stats"></div>
   </div>
@@ -243,20 +215,9 @@ ul.entries li{ display:flex; justify-content:space-between; align-items:center; 
 
   <div class="card">
     <div class="list-head">
-      <h2 id="listTitle">Despesas por lançar (0)</h2>
-      <button class="btn-secondary" id="clearBtn">Limpar lista</button>
+      <h2 id="listTitle">Despesas recentes</h2>
     </div>
     <ul class="entries" id="entriesList"></ul>
-  </div>
-
-  <div class="card">
-    <h2>Passar para o Excel</h2>
-    <p class="hint">Copia estas linhas e cola na folha <b>Despesas</b> do teu ficheiro, logo a seguir à última linha com dados (colunas A–G). Depois arrasta as fórmulas das colunas H, I e J da linha anterior para preencherem sozinhas.</p>
-    <div class="export-actions">
-      <button class="btn-secondary" id="copyBtn">Copiar linhas</button>
-      <button class="btn-secondary" id="downloadBtn">Descarregar .csv</button>
-    </div>
-    <p class="copied-msg" id="copiedMsg"></p>
   </div>
 
   <p class="footer">Saldo a Dois</p>
@@ -268,8 +229,8 @@ ul.entries li{ display:flex; justify-content:space-between; align-items:center; 
 
 var PEOPLE = { JOAO: "João", NADINE: "Nadine" };
 
-var MERCHANTS = ["Continente","Pingo Doce","BOLAMA","MERCADONA","VETERINARIA","CAFÉ","Casa","FARMACIA","IUC","Lidl","PRIMOR","RENDA","SEGURO","WELLS","ÁGUA + LUZ","CONTAS","Galp"];
-var CATEGORIES = ["Supermercado","Casa","CONTAS","EMILIO","SAUDE","CARRO","NESPRESSO","PERFUMES","Combustível"];
+var DEFAULT_MERCHANTS = ["Continente","Pingo Doce","BOLAMA","MERCADONA","VETERINARIA","CAFÉ","Casa","FARMACIA","IUC","Lidl","PRIMOR","RENDA","SEGURO","WELLS","ÁGUA + LUZ","CONTAS","Galp"];
+var DEFAULT_CATEGORIES = ["Supermercado","Casa","CONTAS","EMILIO","SAUDE","CARRO","NESPRESSO","PERFUMES","Combustível"];
 var MERCH_CAT = {
   "Continente":"Supermercado","Pingo Doce":"Supermercado","Lidl":"Supermercado","Galp":"Combustível",
   "VETERINARIA":"EMILIO","CONTAS":"Casa","Casa":"CONTAS","MERCADONA":"Supermercado","BOLAMA":"Supermercado",
@@ -277,36 +238,19 @@ var MERCH_CAT = {
   "RENDA":"Casa","ÁGUA + LUZ":"Casa"
 };
 
-// ---- Configuração do Firebase --------------------------------------
-// Substitui estes valores pelos do teu projeto (ver instruções no
-// comentário no topo deste ficheiro). Enquanto ficarem como estão, a
-// página funciona em modo local (só neste dispositivo/browser).
-var firebaseConfig = {
-  apiKey: "AIzaSyCE7KtZzxJcx_ffdIBaWW3iQPI0PpmyaL0",
-  authDomain: "saldo-a-dois-6809c.firebaseapp.com",
-  projectId: "saldo-a-dois-6809c",
-  storageBucket: "saldo-a-dois-6809c.firebasestorage.app",
-  messagingSenderId: "851542355570",
-  appId: "1:851542355570:web:94c51a48c4e497b2279ceb"
-};
-// ----------------------------------------------------------------------
+// ---- Configuração do Apps Script -------------------------------------
+// Cola aqui o URL /exec obtido no passo 4 do Codigo.gs. Enquanto ficar
+// como está, a página funciona em modo local (só neste dispositivo).
+var APPS_SCRIPT_URL = "COLA-AQUI-O-URL-DO-APPS-SCRIPT";
+// ------------------------------------------------------------------------
 
-var db = null;
-var docRef = null;
-var firebaseOK = firebaseConfig.apiKey.indexOf("AIzaSyCE7KtZzxJcx_ffdIBaWW3iQPI0PpmyaL0") === -1;
-if (firebaseOK) {
-  try {
-    firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
-    docRef = db.collection("saldoADois").doc("pendentes");
-  } catch (e) {
-    firebaseOK = false;
-  }
-}
-
+var sheetsOK = APPS_SCRIPT_URL.indexOf("COLA-AQUI") === -1;
 var LOCAL_KEY = "saldoADois.entries";
-var entries = {}; // { id: {data,valor,local,categoria,pct1,pct2,pagoPor,ts} }
+var entries = [];
+var locais = DEFAULT_MERCHANTS.slice();
+var categorias = DEFAULT_CATEGORIES.slice();
 var pendingPayer = null;
+var saving = false;
 
 function setStatus(kind, text) {
   var box = document.getElementById("statusBox");
@@ -317,42 +261,65 @@ function setStatus(kind, text) {
 function loadLocal() {
   try {
     var raw = localStorage.getItem(LOCAL_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch (e) { return {}; }
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
 }
 function saveLocal() {
   try { localStorage.setItem(LOCAL_KEY, JSON.stringify(entries)); } catch (e) {}
 }
 
-function init() {
-  var dl1 = document.getElementById("merchantsList");
-  MERCHANTS.forEach(function (m) { var o = document.createElement("option"); o.value = m; dl1.appendChild(o); });
-  var dl2 = document.getElementById("categoriesList");
-  CATEGORIES.forEach(function (c) { var o = document.createElement("option"); o.value = c; dl2.appendChild(o); });
+function fillDatalist(id, list) {
+  var dl = document.getElementById(id);
+  dl.innerHTML = "";
+  list.forEach(function (v) { var o = document.createElement("option"); o.value = v; dl.appendChild(o); });
+}
 
-  document.getElementById("data").value = new Date().toISOString().slice(0, 10);
-
-  if (firebaseOK) {
-    setStatus("", "A ligar…");
-    docRef.onSnapshot(function (snap) {
-      entries = (snap.exists && snap.data().entries) ? snap.data().entries : {};
-      setStatus("ok", "Sincronizado com a Nadine");
-      render();
-    }, function (err) {
-      console.error(err);
-      setStatus("err", "Erro de ligação — verifica as regras do Firestore. A guardar só neste dispositivo.");
-      firebaseOK = false;
-      entries = loadLocal();
-      render();
-    });
-  } else {
-    setStatus("", "Modo local — só neste dispositivo (configura o Firebase para partilhar com a Nadine)");
+function refresh() {
+  if (!sheetsOK) {
     entries = loadLocal();
     render();
+    return;
   }
+  fetch(APPS_SCRIPT_URL)
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data.ok) throw new Error(data.error || "erro desconhecido");
+      entries = data.entries || [];
+      if (data.locais && data.locais.length) locais = uniq(DEFAULT_MERCHANTS.concat(data.locais));
+      if (data.categorias && data.categorias.length) categorias = uniq(DEFAULT_CATEGORIES.concat(data.categorias));
+      fillDatalist("merchantsList", locais);
+      fillDatalist("categoriesList", categorias);
+      setStatus("ok", "Sincronizado com a Google Sheet");
+      render();
+    })
+    .catch(function (err) {
+      console.error(err);
+      setStatus("err", "Sem ligação à Google Sheet — a tentar de novo em breve.");
+      render();
+    });
+}
 
+function uniq(arr) {
+  var seen = {}, out = [];
+  arr.forEach(function (v) {
+    var k = String(v).trim().toLowerCase();
+    if (!k || seen[k]) return;
+    seen[k] = 1; out.push(v);
+  });
+  return out;
+}
+
+function init() {
+  fillDatalist("merchantsList", locais);
+  fillDatalist("categoriesList", categorias);
+  document.getElementById("data").value = new Date().toISOString().slice(0, 10);
+
+  if (!sheetsOK) {
+    setStatus("", "Modo local — só neste dispositivo (configura o Apps Script para partilhar com a Nadine)");
+  }
   wireEvents();
-  render();
+  refresh();
+  if (sheetsOK) setInterval(refresh, 20000);
 }
 
 function wireEvents() {
@@ -376,9 +343,6 @@ function wireEvents() {
   });
 
   document.getElementById("saveBtn").addEventListener("click", handleSave);
-  document.getElementById("clearBtn").addEventListener("click", handleClear);
-  document.getElementById("copyBtn").addEventListener("click", handleCopy);
-  document.getElementById("downloadBtn").addEventListener("click", handleDownload);
   document.getElementById("entriesList").addEventListener("click", function (e) {
     var btn = e.target.closest("button[data-del]");
     if (!btn) return;
@@ -387,6 +351,7 @@ function wireEvents() {
 }
 
 function handleSave() {
+  if (saving) return;
   var valor = parseFloat(document.getElementById("valor").value);
   var local = document.getElementById("local").value.trim();
   var categoria = document.getElementById("categoria").value.trim();
@@ -403,58 +368,68 @@ function handleSave() {
     return;
   }
 
-  var id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(16).slice(2));
-  var entry = { data: data, valor: valor, local: local, categoria: categoria, pct1: pct1, pct2: pct2, pagoPor: pendingPayer, ts: Date.now() };
+  var entry = { data: data, valor: valor, local: local, categoria: categoria, pct1: pct1, pct2: pct2, pagoPor: pendingPayer };
+  var saveBtn = document.getElementById("saveBtn");
+  saving = true; saveBtn.disabled = true; saveBtn.textContent = "A guardar…";
 
-  if (firebaseOK) {
-    var update = {};
-    update["entries." + id] = entry;
-    docRef.set(update, { merge: true }).catch(function (err) { alert("Erro ao guardar: " + err.message); });
-  } else {
-    entries[id] = entry;
-    saveLocal();
-    render();
+  function resetForm() {
+    document.getElementById("valor").value = "";
+    document.getElementById("local").value = "";
+    document.getElementById("categoria").value = "";
+    document.getElementById("pct1").value = 50;
+    document.getElementById("pct2").value = 50;
+    pendingPayer = null;
+    Array.prototype.forEach.call(document.querySelectorAll("#pagoPorToggle button"), function (b) { b.setAttribute("data-active", "0"); });
+    saving = false; saveBtn.disabled = false; saveBtn.textContent = "Guardar despesa";
+    document.getElementById("valor").focus();
   }
 
-  document.getElementById("valor").value = "";
-  document.getElementById("local").value = "";
-  document.getElementById("categoria").value = "";
-  document.getElementById("pct1").value = 50;
-  document.getElementById("pct2").value = 50;
-  pendingPayer = null;
-  Array.prototype.forEach.call(document.querySelectorAll("#pagoPorToggle button"), function (b) { b.setAttribute("data-active", "0"); });
-  document.getElementById("valor").focus();
+  if (!sheetsOK) {
+    entry.id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(16).slice(2));
+    entries.push(entry);
+    saveLocal();
+    render();
+    resetForm();
+    return;
+  }
+
+  postToSheet({ action: "add", data: data, valor: valor, local: local, categoria: categoria, pct1: pct1, pct2: pct2, pagoPor: pendingPayer })
+    .then(function (res) {
+      if (!res.ok) throw new Error(res.error || "erro ao guardar");
+      resetForm();
+      refresh();
+    })
+    .catch(function (err) {
+      alert("Não foi possível guardar: " + err.message);
+      resetForm();
+    });
 }
 
 function handleDelete(id) {
-  if (firebaseOK) {
-    var update = {};
-    update["entries." + id] = firebase.firestore.FieldValue.delete();
-    docRef.set(update, { merge: true });
-  } else {
-    delete entries[id];
+  if (!sheetsOK) {
+    entries = entries.filter(function (e) { return e.id !== id; });
     saveLocal();
     render();
+    return;
   }
+  postToSheet({ action: "delete", id: id })
+    .then(function (res) {
+      if (!res.ok) throw new Error(res.error || "erro ao remover");
+      refresh();
+    })
+    .catch(function (err) { alert("Não foi possível remover: " + err.message); });
 }
 
-function handleClear() {
-  var list = Object.keys(entries);
-  if (!list.length) return;
-  if (!confirm("Limpar todas as despesas por lançar (" + list.length + ")?")) return;
-  if (firebaseOK) {
-    docRef.set({ entries: {} });
-  } else {
-    entries = {};
-    saveLocal();
-    render();
-  }
+// Envia com Content-Type text/plain de propósito: evita o pedido de
+// "preflight" (OPTIONS) que o Apps Script não sabe responder, e que
+// bloquearia o pedido todo.
+function postToSheet(payload) {
+  return fetch(APPS_SCRIPT_URL, { method: "POST", body: JSON.stringify(payload) })
+    .then(function (r) { return r.json(); });
 }
 
 function sortedList() {
-  return Object.keys(entries).map(function (id) {
-    var e = entries[id]; return Object.assign({ id: id }, e);
-  }).sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+  return entries.slice().sort(function (a, b) { return a.data < b.data ? 1 : a.data > b.data ? -1 : 0; });
 }
 
 function euro(n) {
@@ -464,10 +439,16 @@ function fmtDate(iso) {
   var p = iso.split("-");
   return p.length === 3 ? (p[2] + "/" + p[1] + "/" + p[0]) : iso;
 }
+function currentMonthKey() {
+  var d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+}
 
 function computeSummary(list) {
+  var mk = currentMonthKey();
   var pagoJoao = 0, pagoNadine = 0, quotaJoao = 0, quotaNadine = 0;
   list.forEach(function (e) {
+    if (e.data.slice(0, 7) !== mk) return;
     if (e.pagoPor === "JOAO") pagoJoao += e.valor; else if (e.pagoPor === "NADINE") pagoNadine += e.valor;
     quotaJoao += e.valor * e.pct1 / 100;
     quotaNadine += e.valor * e.pct2 / 100;
@@ -480,8 +461,9 @@ function render() {
   var s = computeSummary(list);
 
   var headline;
-  if (!list.length) {
-    headline = "Sem despesas por lançar de momento.";
+  var hasThisMonth = list.some(function (e) { return e.data.slice(0, 7) === currentMonthKey(); });
+  if (!hasThisMonth) {
+    headline = "Sem despesas este mês ainda.";
   } else if (Math.abs(s.net) < 0.005) {
     headline = "Contas certas — ninguém deve nada.";
   } else if (s.net > 0) {
@@ -497,12 +479,12 @@ function render() {
     "<div><span>Quota João</span><span>" + euro(s.quotaJoao) + " €</span></div>" +
     "<div><span>Quota Nadine</span><span>" + euro(s.quotaNadine) + " €</span></div>";
 
-  document.getElementById("listTitle").textContent = "Despesas por lançar (" + list.length + ")";
+  var recent = list.slice(0, 10);
   var ul = document.getElementById("entriesList");
-  if (!list.length) {
-    ul.innerHTML = '<li class="empty" style="border:none;">Ainda não há nenhuma despesa por lançar.</li>';
+  if (!recent.length) {
+    ul.innerHTML = '<li class="empty">Ainda não há despesas registadas.</li>';
   } else {
-    ul.innerHTML = list.map(function (e) {
+    ul.innerHTML = recent.map(function (e) {
       return '<li>' +
         '<div class="entry-main">' +
           '<span class="entry-title">' + escapeHtml(e.local) + ' <span class="badge ' + e.pagoPor + '">' + PEOPLE[e.pagoPor] + '</span></span>' +
@@ -521,48 +503,6 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, function (c) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
   });
-}
-
-function buildRows(list) {
-  return list.map(function (e) {
-    return [fmtDate(e.data), e.valor.toLocaleString("pt-PT", { minimumFractionDigits: 2 }), e.local, e.categoria, e.pct1, e.pct2, PEOPLE[e.pagoPor].toUpperCase()].join("\t");
-  }).join("\n");
-}
-
-function handleCopy() {
-  var list = sortedList();
-  if (!list.length) return;
-  var text = buildRows(list);
-  var msg = document.getElementById("copiedMsg");
-  function ok() { msg.textContent = "Copiado! Já podes colar no Excel."; setTimeout(function () { msg.textContent = ""; }, 3000); }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(ok).catch(function () { fallbackCopy(text, ok); });
-  } else {
-    fallbackCopy(text, ok);
-  }
-}
-function fallbackCopy(text, cb) {
-  var ta = document.createElement("textarea");
-  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-  document.body.appendChild(ta); ta.select();
-  try { document.execCommand("copy"); cb(); } catch (e) {}
-  document.body.removeChild(ta);
-}
-
-function handleDownload() {
-  var list = sortedList();
-  if (!list.length) return;
-  var header = ["Data", "Valor", "Local", "Categoria", "% João", "% Nadine", "Pago por"].join(";");
-  var rows = list.map(function (e) {
-    return [fmtDate(e.data), e.valor.toLocaleString("pt-PT", { minimumFractionDigits: 2 }), e.local, e.categoria, e.pct1, e.pct2, PEOPLE[e.pagoPor].toUpperCase()].join(";");
-  });
-  var csv = "﻿" + header + "\n" + rows.join("\n");
-  var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement("a");
-  a.href = url; a.download = "despesas.csv";
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 init();
