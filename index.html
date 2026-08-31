@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<!--
+  SALDO A DOIS — despesas partilhadas
+  =====================================
+  Como ativar a partilha em tempo real (Firebase, gratuito):
+
+  1. Vai a https://console.firebase.google.com → "Adicionar projeto" → dá-lhe
+     um nome (ex.: saldo-a-dois) → podes desativar o Google Analytics.
+  2. Dentro do projeto: ícone "</>" (Adicionar app Web) → dá um nome → NÃO
+     precisas de Firebase Hosting → "Registar app". Vais ver um bloco
+     `firebaseConfig = { apiKey: ..., authDomain: ..., ... }`. Copia esses
+     valores.
+  3. No menu esquerdo: Build → Firestore Database → "Criar base de dados"
+     → escolhe uma localização (ex.: eur3) → modo "produção".
+  4. Separador "Regras" da Firestore Database, substitui pelo seguinte e
+     publica:
+
+       rules_version = '2';
+       service cloud.firestore {
+         match /databases/{database}/documents {
+           match /{document=**} {
+             allow read, write: if true;
+           }
+         }
+       }
+
+     (Isto deixa qualquer pessoa com o link do site ler/escrever nesta base
+     de dados — é simples de propósito, tal como usar o mesmo link. Não
+     partilhes o link publicamente.)
+  5. Volta a este ficheiro e substitui os valores de exemplo no objeto
+     `firebaseConfig`, mais abaixo neste <head>, pelos que copiaste no
+     passo 2. Grava e publica no GitHub Pages.
+
+  Sem estes passos, a página funciona na mesma, mas cada pessoa só vê a
+  sua própria lista (guardada no seu browser).
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saldo a Dois</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,680&family=JetBrains+Mono:wght@500;600&display=swap">
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<style>
+:root{
+  --ink:#1A1917;
+  --ink-soft:#6b6862;
+  --paper:#F4F3EF;
+  --card:#FFFFFF;
+  --line: rgba(26,25,23,.12);
+  --line-strong: rgba(26,25,23,.22);
+  --accent:#146857;
+  --accent-strong:#0E4E41;
+  --accent-soft:#E1EFEA;
+  --joao:#33499A;
+  --joao-soft:#E7EBF8;
+  --nadine:#A32B52;
+  --nadine-soft:#F7E5EB;
+  --danger:#A5391F;
+  --danger-soft:#F3E4DE;
+  --shadow: 0 1px 2px rgba(26,25,23,.05), 0 8px 20px -12px rgba(26,25,23,.18);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#EDEBE6;
+    --ink-soft:#A6A29A;
+    --paper:#15181A;
+    --card:#1D2124;
+    --line: rgba(237,235,230,.13);
+    --line-strong: rgba(237,235,230,.24);
+    --accent:#3FBFA0;
+    --accent-strong:#63D3B7;
+    --accent-soft: rgba(63,191,160,.15);
+    --joao:#93A6EE;
+    --joao-soft: rgba(147,166,238,.16);
+    --nadine:#EE84A2;
+    --nadine-soft: rgba(238,132,162,.16);
+    --danger:#E2764F;
+    --danger-soft: rgba(226,118,79,.15);
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 22px -12px rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#EDEBE6;
+  --ink-soft:#A6A29A;
+  --paper:#15181A;
+  --card:#1D2124;
+  --line: rgba(237,235,230,.13);
+  --line-strong: rgba(237,235,230,.24);
+  --accent:#3FBFA0;
+  --accent-strong:#63D3B7;
+  --accent-soft: rgba(63,191,160,.15);
+  --joao:#93A6EE;
+  --joao-soft: rgba(147,166,238,.16);
+  --nadine:#EE84A2;
+  --nadine-soft: rgba(238,132,162,.16);
+  --danger:#E2764F;
+  --danger-soft: rgba(226,118,79,.15);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 22px -12px rgba(0,0,0,.5);
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--font-body);
+  display:flex;
+  justify-content:center;
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+.app{ width:100%; max-width:560px; padding:32px 18px 64px; display:flex; flex-direction:column; gap:16px; }
+h1,h2,p{margin:0;}
+button{font-family:var(--font-body); cursor:pointer;}
+input,button,select{color:var(--ink); font-size:15px;}
+input:focus,button:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+.topbar{padding:0 2px;}
+.eyebrow{font-size:12px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color:var(--accent); margin:0 0 4px;}
+.title{font-family:var(--font-display); font-weight:680; font-size:30px; letter-spacing:-.01em;}
+
+.status{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft); margin-top:8px; }
+.status .dot{ width:8px; height:8px; border-radius:50%; background:var(--ink-soft); flex:none; }
+.status.ok .dot{ background:var(--accent); }
+.status.err .dot{ background:var(--danger); }
+.status a{ color:inherit; }
+
+.card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:20px; }
+.card + .card{ margin-top:0; }
+.card h2{ font-size:13px; text-transform:uppercase; letter-spacing:.06em; font-weight:700; color:var(--ink-soft); margin-bottom:14px; }
+
+.headline{ font-family:var(--font-display); font-size:22px; font-weight:600; line-height:1.35; margin-bottom:16px; }
+.headline b{ font-weight:680; }
+.stats{ display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; font-size:14px; }
+.stats div{ display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); }
+.stats span:last-child{ font-family:var(--font-mono); font-weight:600; }
+
+.field{ margin-bottom:14px; }
+.field label{ display:block; font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:5px; }
+.field input{ width:100%; padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--line-strong); background:var(--paper); color:var(--ink); }
+.row2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.row3{ display:grid; grid-template-columns:1fr 1fr 132px; gap:12px; }
+
+.toggle{ display:flex; gap:8px; }
+.toggle button{ flex:1; padding:10px; border-radius:var(--radius-sm); border:1px solid var(--line-strong); background:var(--paper); color:var(--ink); font-weight:600; }
+.toggle button[data-active="1"][data-p="JOAO"]{ background:var(--joao-soft); border-color:var(--joao); color:var(--joao); }
+.toggle button[data-active="1"][data-p="NADINE"]{ background:var(--nadine-soft); border-color:var(--nadine); color:var(--nadine); }
+
+.split{ display:flex; align-items:center; gap:10px; }
+.split .field{ margin-bottom:0; flex:1; }
+.split span{ color:var(--ink-soft); font-size:13px; }
+
+.btn-primary{ width:100%; padding:13px; border-radius:var(--radius-sm); border:none; background:var(--accent); color:#fff; font-weight:700; font-size:15px; margin-top:4px; }
+.btn-primary:hover{ background:var(--accent-strong); }
+.btn-secondary{ padding:9px 14px; border-radius:var(--radius-sm); border:1px solid var(--line-strong); background:transparent; color:var(--ink); font-weight:600; font-size:13.5px; }
+.btn-secondary:hover{ background:var(--line); }
+
+.list-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.list-head h2{ margin:0; }
+ul.entries{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+ul.entries li{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); }
+.entry-main{ display:flex; flex-direction:column; gap:2px; }
+.entry-title{ font-weight:600; font-size:14.5px; }
+.entry-sub{ font-size:12.5px; color:var(--ink-soft); }
+.entry-amount{ font-family:var(--font-mono); font-weight:600; }
+.badge{ display:inline-block; font-size:11px; font-weight:700; padding:2px 7px; border-radius:999px; margin-left:6px; }
+.badge.JOAO{ background:var(--joao-soft); color:var(--joao); }
+.badge.NADINE{ background:var(--nadine-soft); color:var(--nadine); }
+.entry-del{ border:none; background:transparent; color:var(--ink-soft); font-size:17px; line-height:1; padding:4px 6px; border-radius:6px; }
+.entry-del:hover{ background:var(--danger-soft); color:var(--danger); }
+.empty{ font-size:13.5px; color:var(--ink-soft); padding:6px 2px; }
+
+.export-actions{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
+.hint{ font-size:13px; color:var(--ink-soft); line-height:1.5; }
+.copied-msg{ font-size:12.5px; color:var(--accent); font-weight:600; margin-top:8px; height:16px; }
+
+.footer{ text-align:center; font-size:12px; color:var(--ink-soft); padding-top:8px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <p class="eyebrow">Despesas partilhadas</p>
+    <h1 class="title">Saldo a Dois</h1>
+    <div class="status" id="statusBox"><span class="dot"></span><span id="statusText">A verificar ligação…</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Saldo atual</h2>
+    <p class="headline" id="headline">—</p>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h2>Nova despesa</h2>
+    <div class="field">
+      <label for="valor">Valor</label>
+      <input id="valor" type="number" step="0.01" min="0" placeholder="0,00" inputmode="decimal">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="local">Comerciante / Local</label>
+        <input id="local" list="merchantsList" placeholder="ex.: Continente" autocomplete="off">
+        <datalist id="merchantsList"></datalist>
+      </div>
+      <div class="field">
+        <label for="categoria">Categoria</label>
+        <input id="categoria" list="categoriesList" placeholder="ex.: Supermercado" autocomplete="off">
+        <datalist id="categoriesList"></datalist>
+      </div>
+    </div>
+    <div class="field">
+      <label for="data">Data</label>
+      <input id="data" type="date">
+    </div>
+    <div class="field">
+      <label>Pago por</label>
+      <div class="toggle" id="pagoPorToggle">
+        <button type="button" data-p="JOAO">João</button>
+        <button type="button" data-p="NADINE">Nadine</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Divisão</label>
+      <div class="split">
+        <div class="field"><label for="pct1">João</label><input id="pct1" type="number" min="0" max="100" value="50"></div>
+        <span>/</span>
+        <div class="field"><label for="pct2">Nadine</label><input id="pct2" type="number" min="0" max="100" value="50"></div>
+      </div>
+    </div>
+    <button class="btn-primary" id="saveBtn">Guardar despesa</button>
+  </div>
+
+  <div class="card">
+    <div class="list-head">
+      <h2 id="listTitle">Despesas por lançar (0)</h2>
+      <button class="btn-secondary" id="clearBtn">Limpar lista</button>
+    </div>
+    <ul class="entries" id="entriesList"></ul>
+  </div>
+
+  <div class="card">
+    <h2>Passar para o Excel</h2>
+    <p class="hint">Copia estas linhas e cola na folha <b>Despesas</b> do teu ficheiro, logo a seguir à última linha com dados (colunas A–G). Depois arrasta as fórmulas das colunas H, I e J da linha anterior para preencherem sozinhas.</p>
+    <div class="export-actions">
+      <button class="btn-secondary" id="copyBtn">Copiar linhas</button>
+      <button class="btn-secondary" id="downloadBtn">Descarregar .csv</button>
+    </div>
+    <p class="copied-msg" id="copiedMsg"></p>
+  </div>
+
+  <p class="footer">Saldo a Dois</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var PEOPLE = { JOAO: "João", NADINE: "Nadine" };
+
+var MERCHANTS = ["Continente","Pingo Doce","BOLAMA","MERCADONA","VETERINARIA","CAFÉ","Casa","FARMACIA","IUC","Lidl","PRIMOR","RENDA","SEGURO","WELLS","ÁGUA + LUZ","CONTAS","Galp"];
+var CATEGORIES = ["Supermercado","Casa","CONTAS","EMILIO","SAUDE","CARRO","NESPRESSO","PERFUMES","Combustível"];
+var MERCH_CAT = {
+  "Continente":"Supermercado","Pingo Doce":"Supermercado","Lidl":"Supermercado","Galp":"Combustível",
+  "VETERINARIA":"EMILIO","CONTAS":"Casa","Casa":"CONTAS","MERCADONA":"Supermercado","BOLAMA":"Supermercado",
+  "FARMACIA":"SAUDE","CAFÉ":"NESPRESSO","PRIMOR":"PERFUMES","WELLS":"SAUDE","SEGURO":"CARRO","IUC":"CARRO",
+  "RENDA":"Casa","ÁGUA + LUZ":"Casa"
+};
+
+// ---- Configuração do Firebase --------------------------------------
+// Substitui estes valores pelos do teu projeto (ver instruções no
+// comentário no topo deste ficheiro). Enquanto ficarem como estão, a
+// página funciona em modo local (só neste dispositivo/browser).
+var firebaseConfig = {
+  apiKey: "AIzaSyCE7KtZzxJcx_ffdIBaWW3iQPI0PpmyaL0",
+  authDomain: "saldo-a-dois-6809c.firebaseapp.com",
+  projectId: "saldo-a-dois-6809c",
+  storageBucket: "saldo-a-dois-6809c.firebasestorage.app",
+  messagingSenderId: "851542355570",
+  appId: "1:851542355570:web:94c51a48c4e497b2279ceb"
+};
+// ----------------------------------------------------------------------
+
+var db = null;
+var docRef = null;
+var firebaseOK = firebaseConfig.apiKey.indexOf("AIzaSyCE7KtZzxJcx_ffdIBaWW3iQPI0PpmyaL0") === -1;
+if (firebaseOK) {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    docRef = db.collection("saldoADois").doc("pendentes");
+  } catch (e) {
+    firebaseOK = false;
+  }
+}
+
+var LOCAL_KEY = "saldoADois.entries";
+var entries = {}; // { id: {data,valor,local,categoria,pct1,pct2,pagoPor,ts} }
+var pendingPayer = null;
+
+function setStatus(kind, text) {
+  var box = document.getElementById("statusBox");
+  box.className = "status " + kind;
+  document.getElementById("statusText").textContent = text;
+}
+
+function loadLocal() {
+  try {
+    var raw = localStorage.getItem(LOCAL_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function saveLocal() {
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(entries)); } catch (e) {}
+}
+
+function init() {
+  var dl1 = document.getElementById("merchantsList");
+  MERCHANTS.forEach(function (m) { var o = document.createElement("option"); o.value = m; dl1.appendChild(o); });
+  var dl2 = document.getElementById("categoriesList");
+  CATEGORIES.forEach(function (c) { var o = document.createElement("option"); o.value = c; dl2.appendChild(o); });
+
+  document.getElementById("data").value = new Date().toISOString().slice(0, 10);
+
+  if (firebaseOK) {
+    setStatus("", "A ligar…");
+    docRef.onSnapshot(function (snap) {
+      entries = (snap.exists && snap.data().entries) ? snap.data().entries : {};
+      setStatus("ok", "Sincronizado com a Nadine");
+      render();
+    }, function (err) {
+      console.error(err);
+      setStatus("err", "Erro de ligação — verifica as regras do Firestore. A guardar só neste dispositivo.");
+      firebaseOK = false;
+      entries = loadLocal();
+      render();
+    });
+  } else {
+    setStatus("", "Modo local — só neste dispositivo (configura o Firebase para partilhar com a Nadine)");
+    entries = loadLocal();
+    render();
+  }
+
+  wireEvents();
+  render();
+}
+
+function wireEvents() {
+  document.getElementById("pagoPorToggle").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-p]");
+    if (!btn) return;
+    pendingPayer = btn.getAttribute("data-p");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (b) {
+      b.setAttribute("data-active", b === btn ? "1" : "0");
+    });
+  });
+
+  var pct1 = document.getElementById("pct1"), pct2 = document.getElementById("pct2");
+  pct1.addEventListener("input", function () { pct2.value = Math.max(0, 100 - (parseFloat(pct1.value) || 0)); });
+  pct2.addEventListener("input", function () { pct1.value = Math.max(0, 100 - (parseFloat(pct2.value) || 0)); });
+
+  document.getElementById("local").addEventListener("change", function () {
+    var catField = document.getElementById("categoria");
+    var match = MERCH_CAT[this.value.trim()];
+    if (match && !catField.value) catField.value = match;
+  });
+
+  document.getElementById("saveBtn").addEventListener("click", handleSave);
+  document.getElementById("clearBtn").addEventListener("click", handleClear);
+  document.getElementById("copyBtn").addEventListener("click", handleCopy);
+  document.getElementById("downloadBtn").addEventListener("click", handleDownload);
+  document.getElementById("entriesList").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-del]");
+    if (!btn) return;
+    handleDelete(btn.getAttribute("data-del"));
+  });
+}
+
+function handleSave() {
+  var valor = parseFloat(document.getElementById("valor").value);
+  var local = document.getElementById("local").value.trim();
+  var categoria = document.getElementById("categoria").value.trim();
+  var data = document.getElementById("data").value;
+  var pct1 = parseFloat(document.getElementById("pct1").value);
+  var pct2 = parseFloat(document.getElementById("pct2").value);
+
+  if (!valor || valor <= 0 || !local || !categoria || !pendingPayer || !data) {
+    alert("Preenche todos os campos antes de guardar.");
+    return;
+  }
+  if (Math.round(pct1 + pct2) !== 100) {
+    alert("A soma das percentagens tem de ser 100%.");
+    return;
+  }
+
+  var id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(16).slice(2));
+  var entry = { data: data, valor: valor, local: local, categoria: categoria, pct1: pct1, pct2: pct2, pagoPor: pendingPayer, ts: Date.now() };
+
+  if (firebaseOK) {
+    var update = {};
+    update["entries." + id] = entry;
+    docRef.set(update, { merge: true }).catch(function (err) { alert("Erro ao guardar: " + err.message); });
+  } else {
+    entries[id] = entry;
+    saveLocal();
+    render();
+  }
+
+  document.getElementById("valor").value = "";
+  document.getElementById("local").value = "";
+  document.getElementById("categoria").value = "";
+  document.getElementById("pct1").value = 50;
+  document.getElementById("pct2").value = 50;
+  pendingPayer = null;
+  Array.prototype.forEach.call(document.querySelectorAll("#pagoPorToggle button"), function (b) { b.setAttribute("data-active", "0"); });
+  document.getElementById("valor").focus();
+}
+
+function handleDelete(id) {
+  if (firebaseOK) {
+    var update = {};
+    update["entries." + id] = firebase.firestore.FieldValue.delete();
+    docRef.set(update, { merge: true });
+  } else {
+    delete entries[id];
+    saveLocal();
+    render();
+  }
+}
+
+function handleClear() {
+  var list = Object.keys(entries);
+  if (!list.length) return;
+  if (!confirm("Limpar todas as despesas por lançar (" + list.length + ")?")) return;
+  if (firebaseOK) {
+    docRef.set({ entries: {} });
+  } else {
+    entries = {};
+    saveLocal();
+    render();
+  }
+}
+
+function sortedList() {
+  return Object.keys(entries).map(function (id) {
+    var e = entries[id]; return Object.assign({ id: id }, e);
+  }).sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+}
+
+function euro(n) {
+  return (Math.round(n * 100) / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtDate(iso) {
+  var p = iso.split("-");
+  return p.length === 3 ? (p[2] + "/" + p[1] + "/" + p[0]) : iso;
+}
+
+function computeSummary(list) {
+  var pagoJoao = 0, pagoNadine = 0, quotaJoao = 0, quotaNadine = 0;
+  list.forEach(function (e) {
+    if (e.pagoPor === "JOAO") pagoJoao += e.valor; else if (e.pagoPor === "NADINE") pagoNadine += e.valor;
+    quotaJoao += e.valor * e.pct1 / 100;
+    quotaNadine += e.valor * e.pct2 / 100;
+  });
+  return { pagoJoao: pagoJoao, pagoNadine: pagoNadine, quotaJoao: quotaJoao, quotaNadine: quotaNadine, net: pagoJoao - quotaJoao };
+}
+
+function render() {
+  var list = sortedList();
+  var s = computeSummary(list);
+
+  var headline;
+  if (!list.length) {
+    headline = "Sem despesas por lançar de momento.";
+  } else if (Math.abs(s.net) < 0.005) {
+    headline = "Contas certas — ninguém deve nada.";
+  } else if (s.net > 0) {
+    headline = "Nadine deve <b>" + euro(s.net) + " €</b> a João.";
+  } else {
+    headline = "João deve <b>" + euro(-s.net) + " €</b> a Nadine.";
+  }
+  document.getElementById("headline").innerHTML = headline;
+
+  document.getElementById("stats").innerHTML =
+    "<div><span>Pago por João</span><span>" + euro(s.pagoJoao) + " €</span></div>" +
+    "<div><span>Pago por Nadine</span><span>" + euro(s.pagoNadine) + " €</span></div>" +
+    "<div><span>Quota João</span><span>" + euro(s.quotaJoao) + " €</span></div>" +
+    "<div><span>Quota Nadine</span><span>" + euro(s.quotaNadine) + " €</span></div>";
+
+  document.getElementById("listTitle").textContent = "Despesas por lançar (" + list.length + ")";
+  var ul = document.getElementById("entriesList");
+  if (!list.length) {
+    ul.innerHTML = '<li class="empty" style="border:none;">Ainda não há nenhuma despesa por lançar.</li>';
+  } else {
+    ul.innerHTML = list.map(function (e) {
+      return '<li>' +
+        '<div class="entry-main">' +
+          '<span class="entry-title">' + escapeHtml(e.local) + ' <span class="badge ' + e.pagoPor + '">' + PEOPLE[e.pagoPor] + '</span></span>' +
+          '<span class="entry-sub">' + escapeHtml(e.categoria) + ' · ' + fmtDate(e.data) + ' · ' + e.pct1 + '/' + e.pct2 + '%</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span class="entry-amount">' + euro(e.valor) + ' €</span>' +
+          '<button class="entry-del" data-del="' + e.id + '" aria-label="Remover">×</button>' +
+        '</div>' +
+      '</li>';
+    }).join("");
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+
+function buildRows(list) {
+  return list.map(function (e) {
+    return [fmtDate(e.data), e.valor.toLocaleString("pt-PT", { minimumFractionDigits: 2 }), e.local, e.categoria, e.pct1, e.pct2, PEOPLE[e.pagoPor].toUpperCase()].join("\t");
+  }).join("\n");
+}
+
+function handleCopy() {
+  var list = sortedList();
+  if (!list.length) return;
+  var text = buildRows(list);
+  var msg = document.getElementById("copiedMsg");
+  function ok() { msg.textContent = "Copiado! Já podes colar no Excel."; setTimeout(function () { msg.textContent = ""; }, 3000); }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok).catch(function () { fallbackCopy(text, ok); });
+  } else {
+    fallbackCopy(text, ok);
+  }
+}
+function fallbackCopy(text, cb) {
+  var ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); cb(); } catch (e) {}
+  document.body.removeChild(ta);
+}
+
+function handleDownload() {
+  var list = sortedList();
+  if (!list.length) return;
+  var header = ["Data", "Valor", "Local", "Categoria", "% João", "% Nadine", "Pago por"].join(";");
+  var rows = list.map(function (e) {
+    return [fmtDate(e.data), e.valor.toLocaleString("pt-PT", { minimumFractionDigits: 2 }), e.local, e.categoria, e.pct1, e.pct2, PEOPLE[e.pagoPor].toUpperCase()].join(";");
+  });
+  var csv = "﻿" + header + "\n" + rows.join("\n");
+  var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = "despesas.csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+init();
+})();
+</script>
+</body>
+</html>
