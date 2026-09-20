@@ -171,6 +171,7 @@ ul.entries li{ display:flex; justify-content:space-between; align-items:center; 
 .entry-del:hover{ background:var(--danger-soft); color:var(--danger); }
 .empty{ font-size:13.5px; color:var(--ink-soft); padding:6px 2px; border:none !important; }
 
+.hint{ font-size:13px; color:var(--ink-soft); line-height:1.5; margin-bottom:14px; }
 .footer{ text-align:center; font-size:12px; color:var(--ink-soft); padding-top:8px; }
 </style>
 </head>
@@ -184,9 +185,23 @@ ul.entries li{ display:flex; justify-content:space-between; align-items:center; 
   </div>
 
   <div class="card">
-    <h2>Saldo do mês</h2>
+    <h2>Saldo atual</h2>
     <p class="headline" id="headline">—</p>
     <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card" id="settleCard" style="display:none;">
+    <h2>Saldar contas</h2>
+    <p class="hint" id="settleInfo"></p>
+    <div class="field">
+      <label for="settleValor">Valor a saldar</label>
+      <input id="settleValor" type="number" step="0.01" min="0" placeholder="0,00" inputmode="decimal">
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn-secondary" id="settleAllBtn" type="button">Saldar tudo</button>
+      <button class="btn-primary" id="settleBtn" type="button" style="flex:1; margin-top:0;">Registar acerto</button>
+    </div>
+    <ul class="entries" id="settlementsList" style="margin-top:14px;"></ul>
   </div>
 
   <div class="card">
@@ -262,11 +277,14 @@ var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz5_9sZCSbG4VhiBq
 
 var sheetsOK = APPS_SCRIPT_URL.indexOf("COLA-AQUI") === -1;
 var LOCAL_KEY = "saldoADois.entries";
+var LOCAL_KEY_SETTLE = "saldoADois.acertos";
 var entries = [];
+var settlements = [];
 var locais = DEFAULT_MERCHANTS.slice();
 var categorias = DEFAULT_CATEGORIES.slice();
 var pendingPayer = null;
 var saving = false;
+var settling = false;
 
 function setStatus(kind, text) {
   var box = document.getElementById("statusBox");
@@ -283,6 +301,15 @@ function loadLocal() {
 function saveLocal() {
   try { localStorage.setItem(LOCAL_KEY, JSON.stringify(entries)); } catch (e) {}
 }
+function loadLocalSettle() {
+  try {
+    var raw = localStorage.getItem(LOCAL_KEY_SETTLE);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+function saveLocalSettle() {
+  try { localStorage.setItem(LOCAL_KEY_SETTLE, JSON.stringify(settlements)); } catch (e) {}
+}
 
 function fillDatalist(id, list) {
   var dl = document.getElementById(id);
@@ -293,6 +320,7 @@ function fillDatalist(id, list) {
 function refresh() {
   if (!sheetsOK) {
     entries = loadLocal();
+    settlements = loadLocalSettle();
     render();
     return;
   }
@@ -301,6 +329,7 @@ function refresh() {
     .then(function (data) {
       if (!data.ok) throw new Error(data.error || "erro desconhecido");
       entries = data.entries || [];
+      settlements = data.acertos || [];
       if (data.locais && data.locais.length) locais = uniq(DEFAULT_MERCHANTS.concat(data.locais));
       if (data.categorias && data.categorias.length) categorias = uniq(DEFAULT_CATEGORIES.concat(data.categorias));
       fillDatalist("merchantsList", locais);
@@ -363,6 +392,17 @@ function wireEvents() {
     var btn = e.target.closest("button[data-del]");
     if (!btn) return;
     handleDelete(btn.getAttribute("data-del"));
+  });
+
+  document.getElementById("settleAllBtn").addEventListener("click", function () {
+    var s = computeSummary(entries, settlements);
+    document.getElementById("settleValor").value = Math.abs(s.net).toFixed(2);
+  });
+  document.getElementById("settleBtn").addEventListener("click", handleSettle);
+  document.getElementById("settlementsList").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-del]");
+    if (!btn) return;
+    handleDeleteSettle(btn.getAttribute("data-del"));
   });
 }
 
@@ -436,6 +476,67 @@ function handleDelete(id) {
     .catch(function (err) { alert("Não foi possível remover: " + err.message); });
 }
 
+function handleSettle() {
+  if (settling) return;
+  var valor = parseFloat(document.getElementById("settleValor").value);
+  if (!valor || valor <= 0) {
+    alert("Indica um valor a saldar maior que zero.");
+    return;
+  }
+  var s = computeSummary(entries, settlements);
+  if (Math.abs(s.net) < 0.005) {
+    alert("Não há saldo por acertar de momento.");
+    return;
+  }
+  // Quem está a saldar é sempre quem deve neste momento.
+  var pagoPor = s.net > 0 ? "NADINE" : "JOAO";
+  var data = new Date().toISOString().slice(0, 10);
+  var settleBtn = document.getElementById("settleBtn");
+  settling = true; settleBtn.disabled = true; settleBtn.textContent = "A registar…";
+
+  function resetSettleForm() {
+    document.getElementById("settleValor").value = "";
+    settling = false; settleBtn.disabled = false; settleBtn.textContent = "Registar acerto";
+  }
+
+  if (!sheetsOK) {
+    settlements.push({
+      id: (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "-" + Math.random().toString(16).slice(2)),
+      data: data, valor: valor, pagoPor: pagoPor
+    });
+    saveLocalSettle();
+    render();
+    resetSettleForm();
+    return;
+  }
+
+  postToSheet({ action: "settle", data: data, valor: valor, pagoPor: pagoPor })
+    .then(function (res) {
+      if (!res.ok) throw new Error(res.error || "erro ao registar acerto");
+      resetSettleForm();
+      refresh();
+    })
+    .catch(function (err) {
+      alert("Não foi possível registar o acerto: " + err.message);
+      resetSettleForm();
+    });
+}
+
+function handleDeleteSettle(id) {
+  if (!sheetsOK) {
+    settlements = settlements.filter(function (s) { return s.id !== id; });
+    saveLocalSettle();
+    render();
+    return;
+  }
+  postToSheet({ action: "deleteSettle", id: id })
+    .then(function (res) {
+      if (!res.ok) throw new Error(res.error || "erro ao remover acerto");
+      refresh();
+    })
+    .catch(function (err) { alert("Não foi possível remover: " + err.message); });
+}
+
 // Envia com Content-Type text/plain de propósito: evita o pedido de
 // "preflight" (OPTIONS) que o Apps Script não sabe responder, e que
 // bloquearia o pedido todo.
@@ -460,26 +561,44 @@ function currentMonthKey() {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 }
 
-function computeSummary(list) {
-  var mk = currentMonthKey();
+// Saldo acumulado: soma TODAS as despesas alguma vez registadas, não só as
+// do mês corrente — assim, se ficar por acertar de um mês para o outro,
+// o valor continua a contar em vez de "desaparecer" no dia 1. Os acertos
+// (pagamentos feitos para saldar contas, totais ou parciais) reduzem esse
+// saldo na direção certa.
+function computeSummary(list, settleList) {
   var pagoJoao = 0, pagoNadine = 0, quotaJoao = 0, quotaNadine = 0;
   list.forEach(function (e) {
-    if (e.data.slice(0, 7) !== mk) return;
     if (e.pagoPor === "JOAO") pagoJoao += e.valor; else if (e.pagoPor === "NADINE") pagoNadine += e.valor;
     quotaJoao += e.valor * e.pct1 / 100;
     quotaNadine += e.valor * e.pct2 / 100;
   });
-  return { pagoJoao: pagoJoao, pagoNadine: pagoNadine, quotaJoao: quotaJoao, quotaNadine: quotaNadine, net: pagoJoao - quotaJoao };
+  var netDespesas = pagoJoao - quotaJoao;
+
+  var settleJoao = 0, settleNadine = 0;
+  (settleList || []).forEach(function (s) {
+    if (s.pagoPor === "JOAO") settleJoao += s.valor; else if (s.pagoPor === "NADINE") settleNadine += s.valor;
+  });
+  var net = netDespesas + settleJoao - settleNadine;
+
+  return {
+    pagoJoao: pagoJoao, pagoNadine: pagoNadine, quotaJoao: quotaJoao, quotaNadine: quotaNadine,
+    settleJoao: settleJoao, settleNadine: settleNadine, net: net
+  };
+}
+
+function sortedSettlements() {
+  return settlements.slice().sort(function (a, b) { return a.data < b.data ? 1 : a.data > b.data ? -1 : 0; });
 }
 
 function render() {
   var list = sortedList();
-  var s = computeSummary(list);
+  var settleList = sortedSettlements();
+  var s = computeSummary(list, settleList);
 
   var headline;
-  var hasThisMonth = list.some(function (e) { return e.data.slice(0, 7) === currentMonthKey(); });
-  if (!hasThisMonth) {
-    headline = "Sem despesas este mês ainda.";
+  if (!list.length && !settleList.length) {
+    headline = "Sem despesas registadas ainda.";
   } else if (Math.abs(s.net) < 0.005) {
     headline = "Contas certas — ninguém deve nada.";
   } else if (s.net > 0) {
@@ -509,6 +628,42 @@ function render() {
         '<div style="display:flex;align-items:center;gap:8px;">' +
           '<span class="entry-amount">' + euro(e.valor) + ' €</span>' +
           '<button class="entry-del" data-del="' + e.id + '" aria-label="Remover">×</button>' +
+        '</div>' +
+      '</li>';
+    }).join("");
+  }
+
+  renderSettleCard(s, settleList);
+}
+
+function renderSettleCard(s, settleList) {
+  var card = document.getElementById("settleCard");
+  var hasDebt = Math.abs(s.net) >= 0.005;
+  card.style.display = (hasDebt || settleList.length) ? "" : "none";
+
+  var info = document.getElementById("settleInfo");
+  if (hasDebt) {
+    var devedor = s.net > 0 ? "Nadine" : "João";
+    var credor = s.net > 0 ? "João" : "Nadine";
+    info.textContent = devedor + " deve " + euro(Math.abs(s.net)) + " € a " + credor + ". Regista abaixo quanto já foi pago (pode ser só uma parte).";
+  } else {
+    info.textContent = "Contas certas de momento — nada por saldar.";
+  }
+  document.getElementById("settleBtn").disabled = !hasDebt;
+
+  var ul = document.getElementById("settlementsList");
+  if (!settleList.length) {
+    ul.innerHTML = "";
+  } else {
+    ul.innerHTML = settleList.slice(0, 6).map(function (st) {
+      return '<li>' +
+        '<div class="entry-main">' +
+          '<span class="entry-title">' + PEOPLE[st.pagoPor] + ' pagou <span class="badge ' + st.pagoPor + '">acerto</span></span>' +
+          '<span class="entry-sub">' + fmtDate(st.data) + '</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span class="entry-amount">' + euro(st.valor) + ' €</span>' +
+          '<button class="entry-del" data-del="' + st.id + '" aria-label="Remover">×</button>' +
         '</div>' +
       '</li>';
     }).join("");
