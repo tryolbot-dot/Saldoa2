@@ -144,6 +144,7 @@ button:disabled{opacity:.55; cursor:default;}
 
 .toggle{ display:flex; gap:8px; }
 .toggle button{ flex:1; padding:10px; border-radius:var(--radius-sm); border:1px solid var(--line-strong); background:var(--paper); color:var(--ink); font-weight:600; }
+.toggle button[data-active="1"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
 .toggle button[data-active="1"][data-p="JOAO"]{ background:var(--joao-soft); border-color:var(--joao); color:var(--joao); }
 .toggle button[data-active="1"][data-p="NADINE"]{ background:var(--nadine-soft); border-color:var(--nadine); color:var(--nadine); }
 
@@ -251,6 +252,25 @@ ul.entries li{ display:flex; justify-content:space-between; align-items:center; 
     <ul class="entries" id="entriesList"></ul>
   </div>
 
+  <div class="card">
+    <h2>Consultar despesas</h2>
+    <div class="field">
+      <label for="queryMonth">Mês</label>
+      <input id="queryMonth" type="month">
+    </div>
+    <div class="field">
+      <label>Pago por</label>
+      <div class="toggle" id="queryPayerToggle">
+        <button type="button" data-p="TODOS" data-active="1">Todos</button>
+        <button type="button" data-p="JOAO">João</button>
+        <button type="button" data-p="NADINE">Nadine</button>
+      </div>
+    </div>
+    <button class="btn-secondary" id="queryClearBtn" type="button">Limpar filtros</button>
+    <p class="hint" id="querySummary" style="margin-top:14px;"></p>
+    <ul class="entries" id="queryResults"></ul>
+  </div>
+
   <p class="footer">Saldo a Dois</p>
 </div>
 
@@ -285,6 +305,7 @@ var categorias = DEFAULT_CATEGORIES.slice();
 var pendingPayer = null;
 var saving = false;
 var settling = false;
+var queryPayer = "TODOS";
 
 function setStatus(kind, text) {
   var box = document.getElementById("statusBox");
@@ -358,6 +379,7 @@ function init() {
   fillDatalist("merchantsList", locais);
   fillDatalist("categoriesList", categorias);
   document.getElementById("data").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("queryMonth").value = currentMonthKey();
 
   if (!sheetsOK) {
     setStatus("", "Modo local — só neste dispositivo (configura o Apps Script para partilhar com a Nadine)");
@@ -403,6 +425,30 @@ function wireEvents() {
     var btn = e.target.closest("button[data-del]");
     if (!btn) return;
     handleDeleteSettle(btn.getAttribute("data-del"));
+  });
+
+  document.getElementById("queryMonth").addEventListener("change", renderQuery);
+  document.getElementById("queryPayerToggle").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-p]");
+    if (!btn) return;
+    queryPayer = btn.getAttribute("data-p");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (b) {
+      b.setAttribute("data-active", b === btn ? "1" : "0");
+    });
+    renderQuery();
+  });
+  document.getElementById("queryClearBtn").addEventListener("click", function () {
+    document.getElementById("queryMonth").value = "";
+    queryPayer = "TODOS";
+    Array.prototype.forEach.call(document.querySelectorAll("#queryPayerToggle button"), function (b) {
+      b.setAttribute("data-active", b.getAttribute("data-p") === "TODOS" ? "1" : "0");
+    });
+    renderQuery();
+  });
+  document.getElementById("queryResults").addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-del]");
+    if (!btn) return;
+    handleDelete(btn.getAttribute("data-del"));
   });
 }
 
@@ -634,6 +680,38 @@ function render() {
   }
 
   renderSettleCard(s, settleList);
+  renderQuery();
+}
+
+function renderQuery() {
+  var month = document.getElementById("queryMonth").value; // "" ou "YYYY-MM"
+  var list = sortedList().filter(function (e) {
+    if (month && e.data.slice(0, 7) !== month) return false;
+    if (queryPayer !== "TODOS" && e.pagoPor !== queryPayer) return false;
+    return true;
+  });
+
+  var total = list.reduce(function (sum, e) { return sum + e.valor; }, 0);
+  var summaryEl = document.getElementById("querySummary");
+  if (!list.length) {
+    summaryEl.textContent = "Nenhuma despesa encontrada com estes filtros.";
+  } else {
+    summaryEl.textContent = list.length + (list.length === 1 ? " despesa" : " despesas") + " · " + euro(total) + " € no total";
+  }
+
+  var ul = document.getElementById("queryResults");
+  ul.innerHTML = list.map(function (e) {
+    return '<li>' +
+      '<div class="entry-main">' +
+        '<span class="entry-title">' + escapeHtml(e.local) + ' <span class="badge ' + e.pagoPor + '">' + PEOPLE[e.pagoPor] + '</span></span>' +
+        '<span class="entry-sub">' + escapeHtml(e.categoria) + ' · ' + fmtDate(e.data) + ' · ' + e.pct1 + '/' + e.pct2 + '%</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span class="entry-amount">' + euro(e.valor) + ' €</span>' +
+        '<button class="entry-del" data-del="' + e.id + '" aria-label="Remover">×</button>' +
+      '</div>' +
+    '</li>';
+  }).join("");
 }
 
 function renderSettleCard(s, settleList) {
